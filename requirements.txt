@@ -6,3 +6,6 @@ seaborn
 jupyterlab
 tensorflow
 graphviz
+Django
+djangorestframework
+gunicorn
