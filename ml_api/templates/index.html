@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Forest Malware Detection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles if needed, but aiming for pure Tailwind */
+        .spinner {
+            border-top-color: #4f46e5; /* Color índigo */
+            -webkit-animation: spin 1s linear infinite;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-300 min-h-screen p-5">
+    <div class="max-w-6xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden">
+        
+        <header class="bg-indigo-700 text-white p-8 text-center">
+            <h1 class="text-4xl font-extrabold mb-2 tracking-tight">Random Forest Malware Detection</h1>
+            <p class="text-lg opacity-90">Análisis y Detección de Malware Móvil</p>
+        </header>
+
+        <div class="p-10">
+            <div class="bg-blue-50 border-l-4 border-blue-500 text-blue-800 p-4 mb-6 rounded-lg">
+                <p><strong>Instrucciones:</strong> Cargue un archivo CSV que contenga los datos de tráfico de red y especifique el porcentaje de muestras a utilizar para el entrenamiento del modelo.</p>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-md mb-8">
+                <form id="uploadForm">
+                    <div class="mb-5">
+                        <label for="csvFile" class="block text-sm font-medium text-gray-700 mb-2">Archivo CSV del Dataset:</label>
+                        <input type="file" id="csvFile" name="dataset" accept=".csv" required 
+                               class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 p-2.5 
+                               file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                    </div>
+
+                    <div class="mb-8">
+                        <label for="trainPercent" class="block text-sm font-medium text-gray-700 mb-2">Porcentaje de datos para entrenamiento:</label>
+                        <input type="range" id="trainPercent" name="train_percent" min="10" max="90" step="10" value="60" required
+                               class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                        <div class="text-right text-indigo-700 font-bold mt-2"><span id="trainPercentValue">60</span>%</div>
+                    </div>
+
+                    <button type="submit" class="w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-150 ease-in-out" id="submitBtn">
+                        Iniciar Entrenamiento y Predicción
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-red-100 border border-red-400 text-red-700 p-4 rounded-lg mb-6 hidden" id="errorMsg"></div>
+
+            <div class="flex flex-col items-center justify-center p-10 hidden" id="loading">
+                <div class="spinner w-12 h-12 border-4 border-gray-200 border-t-4 border-indigo-600 rounded-full animate-spin mb-3"></div>
+                <p class="text-gray-700 font-medium">Entrenando modelo y generando análisis...</p>
+                <p class="text-sm text-gray-500 mt-1">Este proceso puede tardar unos segundos.</p>
+            </div>
+
+            <div class="hidden" id="results">
+                <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">Resultados del Análisis</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    
+                    <div class="bg-indigo-600 text-white p-6 rounded-lg shadow-lg text-center">
+                        <div class="text-sm opacity-90 mb-2">F1 Score Ponderado</div>
+                        <div class="text-4xl font-extrabold" id="f1Score">-</div>
+                    </div>
+                    
+                    <div class="bg-indigo-600 text-white p-6 rounded-lg shadow-lg text-center">
+                        <div class="text-sm opacity-90 mb-2">Muestras de Entrenamiento</div>
+                        <div class="text-4xl font-extrabold" id="trainSamples">-</div>
+                    </div>
+
+                    <div class="bg-indigo-600 text-white p-6 rounded-lg shadow-lg text-center">
+                        <div class="text-sm opacity-90 mb-2">Muestras de Prueba</div>
+                        <div class="text-4xl font-extrabold" id="testSamples">-</div>
+                    </div>
+                </div>
+
+                <div class="space-y-8">
+                    <div class="bg-white p-5 rounded-lg border border-gray-200 shadow-lg">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Límite de Decisión</h3>
+                        <img id="decisionBoundary" alt="Límite de decisión del modelo" class="w-full rounded-lg border border-gray-300 hidden">
+                    </div>
+
+                    <div class="bg-white p-5 rounded-lg border border-gray-200 shadow-lg">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Árbol de Regresión</h3>
+                        <img id="regressionTree" alt="Primer árbol del modelo de Random Forest" class="w-full rounded-lg border border-gray-300 hidden">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Utilizar ruta relativa, asumiendo que Django la mapea
+        const API_URL = '/api/predict/'; 
+
+        // Sincronizar el valor del slider con el texto
+        const trainPercentInput = document.getElementById('trainPercent');
+        const trainPercentValueSpan = document.getElementById('trainPercentValue');
+        trainPercentInput.addEventListener('input', (e) => {
+            trainPercentValueSpan.textContent = e.target.value;
+        });
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('csvFile');
+            const trainPercent = trainPercentInput.value; 
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const errorMsg = document.getElementById('errorMsg');
+
+            if (!fileInput.files[0]) {
+                showError('Por favor, seleccione un archivo CSV.');
+                return;
+            }
+
+            // Ocultar resultados previos y errores
+            results.classList.add('hidden');
+            errorMsg.classList.add('hidden');
+
+            // Mostrar loading
+            loading.classList.remove('hidden');
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            // Preparar FormData
+            const formData = new FormData();
+            formData.append('dataset', fileInput.files[0]);
+            // El backend views.py ya fue modificado para interpretar esto como porcentaje
+            formData.append('train_size', trainPercent); 
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    displayResults(data);
+                } else {
+                    showError(data.error || 'Error en el procesamiento de la solicitud.');
+                }
+            } catch (error) {
+                showError('Error de conexión o fallo del servidor: ' + error.message);
+            } finally {
+                loading.classList.add('hidden');
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        });
+
+        function displayResults(data) {
+            // Actualizar métricas
+            document.getElementById('f1Score').textContent = data.f1_score.toFixed(4);
+            document.getElementById('trainSamples').textContent = data.train_samples;
+            document.getElementById('testSamples').textContent = data.test_samples;
+
+            // Actualizar imágenes
+            const decisionBoundary = document.getElementById('decisionBoundary');
+            if (data.decision_boundary_image) {
+                decisionBoundary.src = data.decision_boundary_image;
+                decisionBoundary.classList.remove('hidden');
+            } else {
+                decisionBoundary.classList.add('hidden');
+            }
+
+            const regressionTree = document.getElementById('regressionTree');
+            if (data.regression_tree_image) {
+                regressionTree.src = data.regression_tree_image;
+                regressionTree.classList.remove('hidden');
+            } else {
+                regressionTree.classList.add('hidden');
+            }
+
+            // Mostrar sección de resultados
+            document.getElementById('results').classList.remove('hidden');
+
+            // Scroll a resultados
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showError(message) {
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.textContent = 'Error: ' + message;
+            errorMsg.classList.remove('hidden');
+        }
+
+        // Mostrar nombre de archivo seleccionado (opcional, para feedback formal)
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name;
+            if (fileName) {
+                console.log('Archivo seleccionado:', fileName);
+            }
+        });
+    </script>
+</body>
+</html>
