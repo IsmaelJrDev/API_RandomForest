@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class ApirfConfig(AppConfig):
+class MlApiConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'apiRF'
+    name = 'ml_api'
