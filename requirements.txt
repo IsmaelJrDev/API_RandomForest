@@ -8,4 +8,4 @@ matplotlib
 seaborn
 Pillow
 gunicorn
-whitenois
+whitenoise
