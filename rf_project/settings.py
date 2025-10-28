@@ -128,3 +128,14 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+
+
+    # rf_project/settings.py (o un archivo de config)
+import os
+from dotenv import load_dotenv # Si usas python-dotenv localmente
+
+load_dotenv() # Carga variables de .env si existe
+
+MONGO_CONNECTION_STRING = os.environ.get('MONGO_URI')
+MONGO_DB_NAME = 'malware_data' # O el nombre que elegiste
+MONGO_COLLECTION_NAME = 'datasets' # O el nombre que elegiste
