@@ -239,7 +239,6 @@ def predict_malware(request):
         response_data = {
             'success': True,
             'f1_score': round(float(f1), 4),
-            # 'accuracy': round(float(acc), 4), # Eliminado de la respuesta
             'train_samples': len(X_train),
             'test_samples': len(X_test),
             'n_features': X.shape[1],
@@ -247,9 +246,9 @@ def predict_malware(request):
             'classification_report': class_report,
             'regression_tree_image': regression_tree_image,
             'decision_boundary_image': decision_boundary_image,
-            'execution_time': round(execution_time, 2)
+            'execution_time': round(execution_time, 2),
+            'dataframe_html': df.head(10).to_html(classes="table-auto w-full text-xs", index=False, border=0)  # <-- Agrega esto
         }
-        
         return Response(response_data, status=status.HTTP_200_OK)
     
     except Exception as e:

@@ -66,7 +66,6 @@
                 <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">Resultados del Análisis</h2>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    
                     <div class="bg-indigo-600 text-white p-6 rounded-lg shadow-lg text-center">
                         <div class="text-sm opacity-90 mb-2">F1 Score</div>
                         <div class="text-4xl font-extrabold" id="f1Score">-</div>
@@ -81,6 +80,14 @@
                         <div class="text-sm opacity-90 mb-2">Muestras de Prueba</div>
                         <div class="text-4xl font-extrabold" id="testSamples">-</div>
                     </div>
+                </div>
+
+                <!-- Aquí va la tabla del DataFrame -->
+                <div class="bg-white p-5 rounded-lg border border-gray-200 shadow-lg mb-8">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Vista previa del Dataset</h3>
+                        <div class="overflow-x-auto rounded-lg border border-gray-200">
+                            <div id="dataframePreview"></div>
+                        </div>
                 </div>
 
                 <div class="space-y-8">
@@ -167,6 +174,21 @@
             document.getElementById('f1Score').textContent = data.f1_score.toFixed(4);
             document.getElementById('trainSamples').textContent = data.train_samples;
             document.getElementById('testSamples').textContent = data.test_samples;
+
+            // Mostrar DataFrame con mejor estilo y divisiones claras
+            const dfPreview = document.getElementById('dataframePreview');
+            if (data.dataframe_html) {
+                // Aplica clases de Tailwind a la tabla generada por pandas para divisiones claras
+                let styledHtml = data.dataframe_html
+                    .replace('<table', '<table class="min-w-full table-auto text-xs border-separate border-spacing-0 border border-gray-300"')
+                    .replace('<thead>', '<thead class="bg-gray-50" >')
+                    .replace(/<th([^>]*)>/g, '<th$1 class="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap border border-gray-300 bg-gray-100" >')
+                    .replace(/<td([^>]*)>/g, '<td$1 class="px-4 py-2 whitespace-nowrap border border-gray-200 bg-white" >')
+                    .replace(/<tr>/g, '<tr class="hover:bg-gray-50" >');
+                dfPreview.innerHTML = styledHtml;
+            } else {
+                dfPreview.innerHTML = '<p class="text-gray-500">No se pudo mostrar el dataset.</p>';
+            }
 
             // Actualizar imágenes
             const decisionBoundary = document.getElementById('decisionBoundary');
