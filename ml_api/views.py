@@ -19,7 +19,9 @@ import base64
 from io import BytesIO
 from django.shortcuts import render
 import math  # { changed code }
-
+import os
+from datetime import datetime
+from pymongo import MongoClient  # <-- Agrega esto
 
 @api_view(['GET'])
 def test_api(request):
@@ -99,10 +101,17 @@ def predict_malware(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Leer el archivo CSV
+        # Leer el archivo CSV y calcular hash para detectar duplicados
         dataset_file = request.FILES['dataset']
         try:
-            df = pd.read_csv(dataset_file)
+            # Leer bytes del archivo (esto consume el stream)
+            dataset_bytes = dataset_file.read()
+            import hashlib
+            file_hash = hashlib.sha256(dataset_bytes).hexdigest()
+
+            # Construir DataFrame desde los bytes
+            from io import BytesIO as _BytesIO
+            df = pd.read_csv(_BytesIO(dataset_bytes))
         except Exception as e:
             return Response(
                 {'error': f'Error al leer CSV: {str(e)}'},
@@ -115,6 +124,44 @@ def predict_malware(request):
                 {'error': 'El archivo CSV está vacío'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # --- COMPROBAR EN MONGODB SI YA EXISTE UN ENTRENAMIENTO IGUAL ---
+        try:
+            mongo_uri_check = os.environ.get('MONGO_URI')
+            if mongo_uri_check:
+                client_check = MongoClient(mongo_uri_check)
+                try:
+                    db_check = client_check.get_default_database()
+                except Exception:
+                    db_check = client_check['randomforest_db']
+
+                collection_check = db_check['trainings']
+                query = {'file_hash': file_hash, 'train_size_percent': train_percent}
+                existing = collection_check.find_one(query)
+                if existing:
+                    # Devolver resultado previamente guardado para acelerar
+                    resp = {
+                        'success': True,
+                        'f1_score': existing.get('f1_score'),
+                        'train_samples': existing.get('train_samples'),
+                        'test_samples': existing.get('test_samples'),
+                        'n_features': existing.get('n_features'),
+                        'classes': existing.get('classes'),
+                        'classification_report': existing.get('classification_report'),
+                        'regression_tree_image': existing.get('regression_tree_image'),
+                        'decision_boundary_image': existing.get('decision_boundary_image'),
+                        'execution_time': existing.get('execution_time'),
+                        'dataframe_html': existing.get('dataframe_html'),
+                        'cached_result': True,
+                        'cached_timestamp': existing.get('timestamp')
+                    }
+                    client_check.close()
+                    return Response(resp, status=status.HTTP_200_OK)
+                client_check.close()
+        except Exception as e_check:
+            # No bloquear el flujo si hay problemas verificando en MongoDB
+            print('Error verificando entrenamiento en MongoDB:', e_check)
+        # --- FIN COMPROBACION ---
         
         # Validar que tenga la columna de clase
         if 'calss' not in df.columns:
@@ -247,8 +294,46 @@ def predict_malware(request):
             'regression_tree_image': regression_tree_image,
             'decision_boundary_image': decision_boundary_image,
             'execution_time': round(execution_time, 2),
-            'dataframe_html': df.head(10).to_html(classes="table-auto w-full text-xs", index=False, border=0)  # <-- Agrega esto
+            'dataframe_html': df.head(10).to_html(classes="table-auto w-full text-xs", index=False, border=0)
         }
+
+        # --- GUARDAR EN MONGODB ---
+        # --- GUARDAR EN MONGODB ---
+        try:
+            mongo_uri = os.environ.get('MONGO_URI')
+            if not mongo_uri:
+                print('MONGO_URI no configurada: se omitirá el guardado en MongoDB')
+            else:
+                client = MongoClient(mongo_uri)
+                try:
+                    db = client.get_default_database()
+                except Exception:
+                    db = client['randomforest_db']
+
+                collection = db['trainings']
+
+                # Guardar documento con file_hash para evitar duplicados futuros
+                training_doc = {
+                    'timestamp': datetime.utcnow(),
+                    'file_hash': file_hash,
+                    'f1_score': response_data['f1_score'],
+                    'train_samples': response_data['train_samples'],
+                    'test_samples': response_data['test_samples'],
+                    'n_features': response_data['n_features'],
+                    'classes': response_data['classes'],
+                    'classification_report': response_data['classification_report'],
+                    'execution_time': response_data['execution_time'],
+                    'train_size_percent': int(request.data.get('train_size', 60)),
+                    'dataframe_html': response_data['dataframe_html'],
+                    'regression_tree_image': response_data['regression_tree_image'],
+                    'decision_boundary_image': response_data['decision_boundary_image'],
+                }
+                collection.insert_one(training_doc)
+                client.close()
+        except Exception as mongo_exc:
+            print("Error guardando en MongoDB:", mongo_exc)
+        # --- FIN GUARDADO MONGODB ---
+
         return Response(response_data, status=status.HTTP_200_OK)
     
     except Exception as e:

@@ -9,3 +9,5 @@ seaborn
 Pillow
 gunicorn
 whitenoise
+pymongo
+python-dotenv
