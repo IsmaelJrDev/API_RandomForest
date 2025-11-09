@@ -20,7 +20,10 @@ from io import BytesIO
 from django.shortcuts import render
 import math  # { changed code }
 import os
+import gc  # Para limpieza de memoria
 from datetime import datetime
+import pickle  # Para guardar/cargar modelos
+import hashlib  # Para generar hashes únicos
 from pymongo import MongoClient  # <-- Agrega esto
 
 @api_view(['GET'])
@@ -109,9 +112,34 @@ def predict_malware(request):
             import hashlib
             file_hash = hashlib.sha256(dataset_bytes).hexdigest()
 
-            # Construir DataFrame desde los bytes
+            # Verificar si existe un modelo guardado para este dataset y porcentaje
+            model_filename = f"ml_api/models/rf_model_{file_hash}_{train_percent}.pkl"
+            scaler_filename = f"ml_api/models/scaler_{file_hash}_{train_percent}.pkl"
+            metadata_filename = f"ml_api/models/metadata_{file_hash}_{train_percent}.pkl"
+            
+            if os.path.exists(model_filename) and os.path.exists(scaler_filename) and os.path.exists(metadata_filename):
+                print("Cargando modelo existente desde PKL...")
+                # Cargar modelo y metadatos
+                with open(model_filename, 'rb') as f:
+                    rf_model = pickle.load(f)
+                with open(scaler_filename, 'rb') as f:
+                    scaler = pickle.load(f)
+                with open(metadata_filename, 'rb') as f:
+                    metadata = pickle.load(f)
+                
+                # Devolver resultados guardados
+                return Response(metadata, status=status.HTTP_200_OK)
+            
+            # Si no existe el modelo, procesar el dataset
+            print("Entrenando nuevo modelo...")
             from io import BytesIO as _BytesIO
-            df = pd.read_csv(_BytesIO(dataset_bytes))
+            chunk_size = 10000
+            chunks = []
+            for chunk in pd.read_csv(_BytesIO(dataset_bytes), chunksize=chunk_size):
+                chunks.append(chunk)
+            df = pd.concat(chunks, ignore_index=True)
+            del chunks  # Liberar memoria
+            
         except Exception as e:
             return Response(
                 {'error': f'Error al leer CSV: {str(e)}'},
@@ -185,12 +213,15 @@ def predict_malware(request):
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
         
-        # Entrenar Random Forest
+        # Entrenar Random Forest con parámetros optimizados para memoria
         rf_model = RandomForestClassifier(
-            n_estimators=10,  # Reducido para velocidad
-            max_depth=10,
+            n_estimators=10,  # Mantener bajo para reducir memoria
+            max_depth=8,      # Reducir profundidad máxima
+            min_samples_split=20,  # Aumentar para reducir complejidad
+            min_samples_leaf=10,   # Aumentar para reducir complejidad
+            max_features='sqrt',   # Usar menos características
             random_state=42,
-            n_jobs=-1
+            n_jobs=2  # Limitar el paralelismo para reducir uso de memoria
         )
         rf_model.fit(X_train_scaled, y_train)
         
@@ -227,26 +258,33 @@ def predict_malware(request):
             rf_reg.fit(X_reduced_train.values, y_train_reg.values)
 
             # Generar la imagen del árbol completo (primer estimador del regresor)
-            fig_reg, ax_reg = plt.subplots(figsize=(20, 12))
+            # Reducir el tamaño de la figura para ahorrar memoria
+            fig_reg, ax_reg = plt.subplots(figsize=(10, 6))
             plot_tree(
                 rf_reg.estimators_[0],
                 feature_names=['min_flowpktl', 'flow_fin'],
                 filled=True,
                 rounded=True,
                 ax=ax_reg,
+                max_depth=5  # Limitar la profundidad del árbol visualizado
             )
-            ax_reg.set_title('Árbol de Regresión (completo)', fontsize=16)
+            ax_reg.set_title('Árbol de Regresión (primeros 5 niveles)', fontsize=12)
             regression_tree_image = image_to_base64(fig_reg)
+            plt.close('all')  # Liberar memoria de las figuras
 
             # Generar límite de decisión similar al notebook
             fig_db, ax_db = plt.subplots(figsize=(12, 6))
             mins = X_reduced_train.min(axis=0) - 1
             maxs = X_reduced_train.max(axis=0) + 1
+            # Reducir la resolución de la grilla para ahorrar memoria
             x1, x2 = np.meshgrid(
-                np.linspace(mins['min_flowpktl'], maxs['min_flowpktl'], 500),
-                np.linspace(mins['flow_fin'], maxs['flow_fin'], 500)
+                np.linspace(mins['min_flowpktl'], maxs['min_flowpktl'], 100),  # Reducido de 500 a 100
+                np.linspace(mins['flow_fin'], maxs['flow_fin'], 100)
             )
             X_new = np.c_[x1.ravel(), x2.ravel()]
+            
+            # Liberar memoria no utilizada
+            gc.collect()
 
             # Predecir (regresión) y discretizar para colorear regiones por clase
             y_mesh = rf_reg.predict(X_new)
@@ -333,6 +371,28 @@ def predict_malware(request):
         except Exception as mongo_exc:
             print("Error guardando en MongoDB:", mongo_exc)
         # --- FIN GUARDADO MONGODB ---
+
+        # Guardar el modelo, scaler y metadatos en PKL
+        try:
+            model_filename = f"ml_api/models/rf_model_{file_hash}_{train_percent}.pkl"
+            scaler_filename = f"ml_api/models/scaler_{file_hash}_{train_percent}.pkl"
+            metadata_filename = f"ml_api/models/metadata_{file_hash}_{train_percent}.pkl"
+            
+            # Guardar modelo
+            with open(model_filename, 'wb') as f:
+                pickle.dump(rf_model, f)
+            
+            # Guardar scaler
+            with open(scaler_filename, 'wb') as f:
+                pickle.dump(scaler, f)
+            
+            # Guardar metadatos (resultados)
+            with open(metadata_filename, 'wb') as f:
+                pickle.dump(response_data, f)
+                
+            print(f"Modelo guardado en: {model_filename}")
+        except Exception as e:
+            print(f"Error guardando modelo en PKL: {e}")
 
         return Response(response_data, status=status.HTTP_200_OK)
     
