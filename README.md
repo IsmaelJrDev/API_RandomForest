@@ -47,7 +47,7 @@ API_RandomForest/
 │   │   └── index.html
 │   ├── models/           # Carpeta para modelos cacheados
 │   └── views.py          # Lógica principal de la API
-├── core/                 # Configuración de Django
+├── rf_project/                 # Configuración de Django
 │   └── settings.py
 ├── manage.py
 └── requirements.txt
